@@ -21,7 +21,7 @@ class Option:
 
         if self.putOrcall == 'call':
             discount_factor = -self.r * self.T
-            return (self.S_0 * norm.cdf(d_1)) - (self.K * np.float_power(e, discount_factor) * d_2)
+            return (self.S_0 * norm.cdf(d_1)) - (self.K * np.float_power(e, discount_factor) * norm.cdf(d_2))
         else:
             return (self.K * np.float_power(e, discount_factor) * norm.cdf(-d_2)) - (self.S_0 * norm.cdf(-d_1))
     def __repr__(self) -> str:
@@ -30,18 +30,34 @@ class Option:
             f"Expiry={self.T:.2f}y, Rate={self.r:.2%}, Vol={self.sigma:.2%}")
     
 #Monte Carlo Section
-def simulate(num_simulations: int, option: Option, dt: float) -> np.array:
-    simulated_paths = []
-    S_t = option.S_0
-    n = 1
-    while n <= num_simulations:
-        delta_z = np.random.normal(0, np.sqrt(dt), num_simulations)
-        d_S = S_t + (option.r * dt) + (option.sigma * option.S_0 * delta_z)
-        simulated_paths.append(d_S)
-        S_t = d_S
-        n +=1
-    return np.array(simulated_paths)
 
+def simulate(num_simulations: int, option: Option, dt: float, theta: float = None, omega: float = None, xi: float = None, nu_0: float = None) -> np.array:
+    steps = int(option.T / dt)
+    S = np.zeros((num_simulations, steps + 1))
+    S[:, 0] = option.S_0
+    
+    if theta is not None:
+        # heston model
+        nu = np.zeros((num_simulations, steps + 1))
+        nu[:, 0] = nu_0
+        
+        for t in range(steps):
+            dz1 = np.random.normal(0, np.sqrt(dt), num_simulations)  # for s
+            dz2 = np.random.normal(0, np.sqrt(dt), num_simulations)  # for vol
+            
+            
+            nu[:, t + 1] = nu[:, t] + theta * (omega - nu[:, t]) * dt + xi * np.sqrt(np.maximum(nu[:, t], 0)) * dz2
+            nu[:, t + 1] = np.maximum(nu[:, t + 1], 0)  # keep non-negative
+            
+            S[:, t + 1] = S[:, t] * np.exp((option.r - 0.5 * nu[:, t]) * dt + 
+                                            np.sqrt(np.maximum(nu[:, t], 0)) * dz1)
+    else:
+        for t in range(steps):
+            delta_z = np.random.normal(0, np.sqrt(dt), num_simulations)
+            S[:, t + 1] = S[:, t] * np.exp((option.r - 0.5 * option.sigma**2) * dt + 
+                                            option.sigma * delta_z)
+    
+    return S[:, -1]
 def calc_expected_price(simulated_paths: np.array, option: Option) -> float:
     
     payoffs = np.maximum(simulated_paths - option.K, 0) if option.putOrcall == 'call' else np.maximum(option.K - simulated_paths, 0)      
@@ -49,3 +65,4 @@ def calc_expected_price(simulated_paths: np.array, option: Option) -> float:
     expected_payoff = np.average(payoffs) * np.float_power(e, discount_factor)
 
     return expected_payoff
+
